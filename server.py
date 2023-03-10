@@ -13,8 +13,11 @@ async def handle_incoming_data(request):
         try:
             message = await ws.get_message()
             if message:
-                message = json.loads(message)
-                buses[message['busId']] = message
+                try:
+                    message = json.loads(message)
+                    buses[message['busId']] = message
+                except json.JSONDecodeError:
+                    print(message)
         except ConnectionClosed:
             break
 
@@ -28,7 +31,7 @@ async def talk_to_browser(request):
         }
     
         await ws.send_message(json.dumps(message))
-        await trio.sleep(1)
+        await trio.sleep(0.1)
 
 
 async def main():
