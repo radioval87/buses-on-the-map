@@ -4,17 +4,34 @@ import json
 import logging
 import os
 import random
+
 from contextlib import suppress
+from functools import wraps
 from sys import stderr
 
 
 import trio
-from trio_websocket import open_websocket_url
+from trio_websocket import open_websocket_url, HandshakeError
 
 
 logger = logging.getLogger('server')
 
 open_websockets = []
+
+
+def relaunch_on_disconnect(async_ws_connection_func):
+    @wraps(async_ws_connection_func)
+    async def apply_retrying(*args, **kwargs):
+        connected = False
+        while not connected:
+            try:
+                result = await async_ws_connection_func(*args, **kwargs)
+                connected = True
+                return result
+            except HandshakeError:
+                logger.info('Unable to connect to server. Retrying')
+                await trio.sleep(1)
+    return apply_retrying
 
 
 def generate_bus_id(emulator_id, route_id, bus_index):
@@ -29,6 +46,7 @@ def load_routes(directory_path='routes'):
                 yield json.load(file)
 
 
+@relaunch_on_disconnect
 async def send_updates(server_address, receive_channel, websockets_number,
                        open_websockets, refresh_timeout):
     async for value in receive_channel:
@@ -129,7 +147,7 @@ if __name__ == '__main__':
         help='Seconds to wait to refresh coordinates'
     )
     parser.add_argument(
-        '--v', type=bool, default=False,
+        '--v', type=bool, default=True,
         help='Turn on logging'
     )
     args = parser.parse_args()
@@ -142,7 +160,7 @@ if __name__ == '__main__':
                 '%(filename)s[LINE:%(lineno)d]# %(levelname)-8s [%(asctime)s] '
                 '%(message)s'
             ),
-            level=logging.INFO
+            level=logging.DEBUG
         )
     with suppress(KeyboardInterrupt):
         trio.run(
